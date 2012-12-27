@@ -55,7 +55,7 @@ class Bibliotik(Tracker):
         files = {'TorrentFileField': open(torrent, 'rb')}
         data = {
             'upload': '',
-            'authkey': authkey,
+            'authkey': self.authkey,
             'AuthorsField': metadata['authors'],
             'TitleField': metadata['title'],
             'IsbnField': metadata['isbn'],
@@ -80,7 +80,8 @@ class Bibliotik(Tracker):
         return r.json()
 
     def has_book(self, isbn):
-        params = {'search': '@isbn %s' % isbn}
+        metadata = self.fetch_metadata(isbn)
+        params = {'search': '@isbn %s' % metadata['isbn']}
         r = self.session.get('http://bibliotik.org/torrents/', params=params)
         return 'No torrents found.' not in r.text
 
@@ -178,8 +179,14 @@ def extract_isbn(filename):
     match = re.search('(\d{10}|\d{13})', filename)
     if match:
         return match.group()
-    else:
-        return None
+
+    command = ['pdftotext', '-f', '1', '-l', '10', filename, '-']
+    text = subprocess.check_output(command)
+    match = re.search('(?:[0-9]{3}-)?[0-9]{1,5}-[0-9]{1,7}-[0-9]{1,6}-[0-9]', text)
+    if match:
+        return match.group().replace('-', '')
+
+    return None
 
 def upload(filename, config, trackers):
     isbn = extract_isbn(filename)
