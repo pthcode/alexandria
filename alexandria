@@ -25,28 +25,32 @@ HEADERS = {
     'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3'
 }
 
-class Bibliotik(object):
-    FORMATS = {
-        '.pdf': '2',
-        '.mobi': '16',
-        '.epub': '15',
-    }
+class Tracker(object):
     def __init__(self, username, password):
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
         self.login(username, password)
 
+class Bibliotik(Tracker):
+
+    FORMATS = {
+        '.pdf': '2',
+        '.mobi': '16',
+        '.epub': '15',
+    }
+
     def login(self, username, password):
         params = {'username': username, 'password': password}
         self.session.post('http://bibliotik.org/login', params)
 
-    def upload(self, filename, isbn):
         r = self.session.get('http://bibliotik.org/upload/ebooks')
         doc = lxml.html.fromstring(r.text)
-        authkey = doc.xpath('//*[@id="body"]/form/input[2]')[0].attrib['value']
-        announce = doc.xpath('//*[@id="body"]/p/input')[0].attrib['value']
-        torrent = make_torrent(filename, announce)
-        metadata = self.fetch_metadata(isbn, authkey)
+        self.authkey = doc.xpath('//*[@id="body"]/form/input[2]')[0].attrib['value']
+        self.announce = doc.xpath('//*[@id="body"]/p/input')[0].attrib['value']
+
+    def upload(self, filename, isbn):
+        torrent = make_torrent(filename, self.announce)
+        metadata = self.fetch_metadata(isbn)
 
         files = {'TorrentFileField': open(torrent, 'rb')}
         data = {
@@ -64,14 +68,14 @@ class Bibliotik(object):
             'ImageField': metadata['image'],
             'DescriptionField': metadata['description'],
         }
-        for k, v in data.items():
-            data[k] = v.encode('utf-8')
+        for key, value in data.items():
+            data[key] = value.encode('utf-8')
 
         r = self.session.post('http://bibliotik.org/upload/ebooks', files=files, data=data)
         return torrent
 
-    def fetch_metadata(self, isbn, authkey):
-        params = {'isbn': isbn, 'authkey': authkey}
+    def fetch_metadata(self, isbn):
+        params = {'isbn': isbn, 'authkey': self.authkey}
         r = self.session.get('http://bibliotik.org/isbnlookup', params=params)
         return r.json()
 
@@ -79,6 +83,42 @@ class Bibliotik(object):
         params = {'search': '@isbn %s' % isbn}
         r = self.session.get('http://bibliotik.org/torrents/', params=params)
         return 'No torrents found.' not in r.text
+
+class WhatCD(Tracker):
+    def login(self, username, password):
+        params = {'username': username, 'password': password}
+        self.session.post('https://what.cd/login.php', params)
+
+        r = self.session.get('https://what.cd/upload.php')
+        doc = lxml.html.fromstring(r.text)
+        self.authkey = doc.xpath('//*[@id="upload_table"]/div[1]/input[2]')[0].attrib['value']
+        self.announce = doc.xpath('//*[@id="content"]/div[2]/p/input')[0].attrib['value']
+
+    def upload(self, filename, isbn):
+        torrent = make_torrent(filename, self.announce)
+        metadata = fetch_metadata(isbn)
+
+        files = {'file_input': open(torrent, 'rb')}
+        data = {
+            'submit': 'true',
+            'auth': self.authkey,
+            'type': '2',
+            'title': "%s - %s" % (metadata['authors'], metadata['title']),
+            'tags': 'non.fiction',
+            'image': metadata['image'],
+            'description': metadata['description'],
+        }
+        for key, value in data.items():
+            data[key] = value.encode('utf-8')
+
+        r = self.session.post('https://what.cd/upload.php', files=files, data=data)
+        return torrent
+
+    def has_book(self, isbn):
+        metadata = fetch_metadata(isbn)
+        params = {'searchstr': metadata['title'], 'filter_cat[3]': 1}
+        r = self.session.get('https://what.cd/torrents.php', params=params)
+        return 'Your search did not match anything.' not in r.text
 
 def locate(root, match_function):
     for path, dirs, files in os.walk(root):
@@ -95,11 +135,21 @@ def make_torrent(filename, announce):
     subprocess.check_output(command, stderr=subprocess.STDOUT)
     return torrent
 
+def fetch_metadata(isbn):
+    params = {'bibkeys': 'ISBN:%s' % isbn, 'jscmd': 'details', 'format': 'json'}
+    r = requests.get('http://openlibrary.org/api/books', params=params)
+    data = r.json()
+    if data:
+        return data
+    else:
+        return None
+
 def parse_config(config_path):
     config = ConfigParser.SafeConfigParser()
-    try:
+
+    if os.path.isfile(config_path):
         config.read(config_path)
-    except:
+    else:
         config_dir = os.path.dirname(config_path)
         if not os.path.isdir(config_dir):
             os.makedirs(config_dir)
@@ -111,6 +161,10 @@ def parse_config(config_path):
         config.add_section('bibliotik')
         config.set('bibliotik', 'username', '')
         config.set('bibliotik', 'password', '')
+
+        config.add_section('whatcd')
+        config.set('whatcd', 'username', '')
+        config.set('whatcd', 'password', '')
 
         with open(config_path, 'w') as f:
             config.write(f)
@@ -133,11 +187,16 @@ def upload(filename, config, trackers):
         return None
 
     for tracker in trackers:
-        if not tracker.has_book(isbn):
-            torrent = tracker.upload(filename, isbn)
-            shutil.copy(filename, config.get('global', 'data_dir'))
-            shutil.copy(torrent, config.get('global', 'torrent_dir'))
-            print 'uploaded %s to %s' % (os.path.basename(filename), tracker.__class__.__name__.lower())
+        if tracker.has_book(isbn):
+            continue
+
+        torrent = tracker.upload(filename, isbn)
+        if torrent is None:
+            continue
+
+        shutil.copy(filename, os.path.expanduser(config.get('global', 'data_dir')))
+        shutil.copy(torrent, os.path.expanduser(config.get('global', 'torrent_dir')))
+        print 'uploaded %s to %s' % (os.path.basename(filename), tracker.__class__.__name__.lower())
 
 def main():
     parser = argparse.ArgumentParser()
@@ -153,7 +212,16 @@ def main():
         username = config.get('bibliotik', 'username')
         password = config.get('bibliotik', 'password')
         if username and password:
-            trackers.append(Bibliotik(username, password))
+            bibliotik = Bibliotik(username, password)
+            trackers.append(bibliotik)
+            global fetch_metadata
+            fetch_metadata = bibliotik.fetch_metadata
+
+    if config.items('whatcd'):
+        username = config.get('whatcd', 'username')
+        password = config.get('whatcd', 'password')
+        if username and password:
+            trackers.append(WhatCD(username, password))
 
     books = itertools.chain(*(locate(book_dir, is_book) for book_dir in args.book_dirs))
     for filename in books:
