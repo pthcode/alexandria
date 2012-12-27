@@ -1,0 +1,162 @@
+#!/usr/bin/env python
+import re
+import os
+import sys
+import shutil
+import argparse
+import tempfile
+import itertools
+import subprocess
+import ConfigParser
+import multiprocessing
+import requests
+import lxml.html
+
+HEADERS = {
+    'Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_3)'\
+        'AppleWebKit/535.11 (KHTML, like Gecko) Chrome/17.0.963.79'\
+        'Safari/535.11',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9'\
+        ',*/*;q=0.8',
+    'Accept-Encoding': 'gzip,deflate,sdch',
+    'Accept-Language': 'en-US,en;q=0.8',
+    'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3'
+}
+
+class Bibliotik(object):
+    FORMATS = {
+        '.pdf': '2',
+        '.mobi': '16',
+        '.epub': '15',
+    }
+    def __init__(self, username, password):
+        self.session = requests.Session()
+        self.session.headers.update(HEADERS)
+        self.login(username, password)
+
+    def login(self, username, password):
+        params = {'username': username, 'password': password}
+        self.session.post('http://bibliotik.org/login', params)
+
+    def upload(self, filename, isbn):
+        r = self.session.get('http://bibliotik.org/upload/ebooks')
+        doc = lxml.html.fromstring(r.text)
+        authkey = doc.xpath('//*[@id="body"]/form/input[2]')[0].attrib['value']
+        announce = doc.xpath('//*[@id="body"]/p/input')[0].attrib['value']
+        torrent = make_torrent(filename, announce)
+        metadata = self.fetch_metadata(isbn, authkey)
+
+        files = {'TorrentFileField': open(torrent, 'rb')}
+        data = {
+            'upload': '',
+            'authkey': authkey,
+            'AuthorsField': metadata['authors'],
+            'TitleField': metadata['title'],
+            'IsbnField': metadata['isbn'],
+            'PublishersField': metadata['publisher'],
+            'PagesField': metadata['pages'],
+            'YearField': metadata['year'],
+            'FormatField': self.FORMATS[os.path.splitext(filename)[-1]],
+            'LanguageField': '1',
+            'TagsField': 'nonfiction', # FIXME
+            'ImageField': metadata['image'],
+            'DescriptionField': metadata['description'],
+        }
+        for k, v in data.items():
+            data[k] = v.encode('utf-8')
+
+        r = self.session.post('http://bibliotik.org/upload/ebooks', files=files, data=data)
+        return torrent
+
+    def fetch_metadata(self, isbn, authkey):
+        params = {'isbn': isbn, 'authkey': authkey}
+        r = self.session.get('http://bibliotik.org/isbnlookup', params=params)
+        return r.json()
+
+    def has_book(self, isbn):
+        params = {'search': '@isbn %s' % isbn}
+        r = self.session.get('http://bibliotik.org/torrents/', params=params)
+        return 'No torrents found.' not in r.text
+
+def locate(root, match_function):
+    for path, dirs, files in os.walk(root):
+        for filename in (os.path.abspath(os.path.join(path, filename)) for filename in files if match_function(filename)):
+            yield filename
+
+def is_book(filename):
+    extension = os.path.splitext(filename)[-1].lower()
+    return extension in ['.pdf', '.epub', '.mobi']
+
+def make_torrent(filename, announce):
+    torrent = os.path.join(tempfile.mkdtemp(), os.path.basename(filename) + '.torrent')
+    command = ['mktorrent', '-p', '-a', announce, '-o', torrent, filename]
+    subprocess.check_output(command, stderr=subprocess.STDOUT)
+    return torrent
+
+def parse_config(config_path):
+    config = ConfigParser.SafeConfigParser()
+    try:
+        config.read(config_path)
+    except:
+        config_dir = os.path.dirname(config_path)
+        if not os.path.isdir(config_dir):
+            os.makedirs(config_dir)
+
+        config.add_section('global')
+        config.set('global', 'torrent_dir', '')
+        config.set('global', 'data_dir', '')
+
+        config.add_section('bibliotik')
+        config.set('bibliotik', 'username', '')
+        config.set('bibliotik', 'password', '')
+
+        with open(config_path, 'w') as f:
+            config.write(f)
+
+        print 'Please edit the configuration file: %s' % config_path
+        sys.exit(2)
+
+    return config
+
+def extract_isbn(filename):
+    match = re.search('(\d{10}|\d{13})', filename)
+    if match:
+        return match.group()
+    else:
+        return None
+
+def upload(filename, config, trackers):
+    isbn = extract_isbn(filename)
+    if not isbn:
+        return None
+
+    for tracker in trackers:
+        if not tracker.has_book(isbn):
+            torrent = tracker.upload(filename, isbn)
+            shutil.copy(filename, config.get('global', 'data_dir'))
+            shutil.copy(torrent, config.get('global', 'torrent_dir'))
+            print 'uploaded %s to %s' % (os.path.basename(filename), tracker.__class__.__name__.lower())
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('book_dirs', nargs='+', help='paths to directories containing books')
+    parser.add_argument('--config', help='the location of the configuration file', \
+            default=os.path.expanduser('~/.alexandria/config'))
+
+    args = parser.parse_args()
+    config = parse_config(args.config)
+
+    trackers = []
+    if config.items('bibliotik'):
+        username = config.get('bibliotik', 'username')
+        password = config.get('bibliotik', 'password')
+        if username and password:
+            trackers.append(Bibliotik(username, password))
+
+    books = itertools.chain(*(locate(book_dir, is_book) for book_dir in args.book_dirs))
+    for filename in books:
+        upload(filename, config, trackers)
+
+if __name__ == '__main__': main()
