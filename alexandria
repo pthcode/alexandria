@@ -232,8 +232,17 @@ def extract_isbn(filename):
     if match:
         return match.group()
 
-    command = ['pdftotext', '-f', '1', '-l', '10', filename, '-']
-    text = subprocess.check_output(command)
+    extension = os.path.splitext(filename)[-1]
+    if extension == '.pdf':
+        command = ['pdftotext', '-f', '1', '-l', '10', filename, '-']
+        text = subprocess.check_output(command)
+    else:
+        textfile = subprocess.check_output(['mktemp', '-u', '--suffix', '.txt']).strip()
+        command = ['ebook-convert', filename, textfile]
+        subprocess.check_output(command)
+        with open(textfile) as f:
+            text = f.read()
+
     match = re.search('(?:[0-9]{3}-)?[0-9]{1,5}-[0-9]{1,7}-[0-9]{1,6}-[0-9]', text)
     if match:
         return match.group().replace('-', '')
@@ -241,7 +250,9 @@ def extract_isbn(filename):
     return None
 
 def rename_ebook(original, output_dir, metadata):
-    new_filename = os.path.join(output_dir, "%s (%s)%s" % (metadata['title'], metadata['isbn'], os.path.splitext(original)[-1]))
+    new_filename = "%s (%s)%s" % (metadata['title'], metadata['isbn'], os.path.splitext(original)[-1])
+    valid_chars = '-_.() abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    new_filename = os.path.join(output_dir, ''.join(c for c in new_filename if c in valid_chars))
     shutil.copy(original, new_filename)
     return new_filename
 
