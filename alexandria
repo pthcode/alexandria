@@ -48,11 +48,9 @@ class Bibliotik(Tracker):
         doc = lxml.html.fromstring(r.text)
         self.authkey = doc.xpath('//*[@id="body"]/form/input[2]')[0].attrib['value']
         self.announce = doc.xpath('//*[@id="body"]/p/input')[0].attrib['value']
+        self.name = "Bibliotik"
 
-    def upload(self, filename, isbn):
-        torrent = make_torrent(filename, self.announce)
-        metadata = self.fetch_metadata(isbn)
-
+    def upload(self, filename, torrent, metadata):
         files = {'TorrentFileField': open(torrent, 'rb')}
         data = {
             'upload': '',
@@ -73,15 +71,17 @@ class Bibliotik(Tracker):
             data[key] = value.encode('utf-8')
 
         r = self.session.post('http://bibliotik.org/upload/ebooks', files=files, data=data)
-        return torrent
+        return True
 
     def fetch_metadata(self, isbn):
         params = {'isbn': isbn, 'authkey': self.authkey}
         r = self.session.get('http://bibliotik.org/isbnlookup', params=params)
-        return r.json()
+        data = r.json()
+        if 'isbn' in data:
+            return data
+        return None
 
-    def has_book(self, isbn):
-        metadata = self.fetch_metadata(isbn)
+    def has_book(self, metadata):
         params = {'search': '@isbn %s' % metadata['isbn']}
         r = self.session.get('http://bibliotik.org/torrents/', params=params)
         return 'No torrents found.' not in r.text
@@ -95,11 +95,9 @@ class WhatCD(Tracker):
         doc = lxml.html.fromstring(r.text)
         self.authkey = doc.xpath('//*[@id="upload_table"]/div[1]/input[2]')[0].attrib['value']
         self.announce = doc.xpath('//*[@id="content"]/div[2]/p/input')[0].attrib['value']
+        self.name = "What.CD"
 
-    def upload(self, filename, isbn):
-        torrent = make_torrent(filename, self.announce)
-        metadata = fetch_metadata(isbn)
-
+    def upload(self, filename, torrent, metadata):
         files = {'file_input': open(torrent, 'rb')}
         data = {
             'submit': 'true',
@@ -114,10 +112,9 @@ class WhatCD(Tracker):
             data[key] = value.encode('utf-8')
 
         r = self.session.post('https://what.cd/upload.php', files=files, data=data)
-        return torrent
+        return True
 
-    def has_book(self, isbn):
-        metadata = fetch_metadata(isbn)
+    def has_book(self, metadata):
         params = {'searchstr': metadata['title'], 'filter_cat[3]': 1}
         r = self.session.get('https://what.cd/torrents.php', params=params)
         return 'Your search did not match anything.' not in r.text
@@ -138,11 +135,9 @@ class STP(Tracker):
         doc = lxml.html.fromstring(r.text)
         self.authkey = doc.xpath('//*[@id="upload_table"]/div[1]/input[2]')[0].attrib['value']
         self.announce = doc.xpath('//*[@id="content"]/div[2]/p/input')[0].attrib['value']
+        self.name = "STP"
 
-    def upload(self, filename, isbn):
-        torrent = make_torrent(filename, self.announce)
-        metadata = fetch_metadata(isbn)
-
+    def upload(self, filename, torrent, metadata):
         authors = [author.strip().encode('utf-8') for author in metadata['authors'].split(',')]
         files = {'file_input': open(torrent, 'rb')}
         data = {
@@ -167,10 +162,9 @@ class STP(Tracker):
             data['tags'] += ', contest.2012'
 
         r = self.session.post('https://stopthepress.es/upload.php', data=data, files=files)
-        return torrent
+        return True
 
-    def has_book(self, isbn):
-        metadata = fetch_metadata(isbn)
+    def has_book(self, metadata):
         params = {'cataloguenumber': metadata['isbn']}
         r = self.session.get('https://stopthepress.es/torrents.php', params=params)
         return 'Your search did not match anything.' not in r.text
@@ -184,9 +178,9 @@ def is_book(filename):
     extension = os.path.splitext(filename)[-1].lower()
     return extension in ['.pdf', '.epub', '.mobi']
 
-def make_torrent(filename, announce):
-    torrent = os.path.join(tempfile.mkdtemp(), os.path.basename(filename) + '.torrent')
-    command = ['mktorrent', '-p', '-a', announce, '-o', torrent, filename]
+def make_torrent(filename, announce, piece_size=16):
+    torrent = subprocess.check_output(['mktemp', '-u', '--suffix', '.torrent']).strip()
+    command = ['mktorrent', '-p', '-a', announce, '-l', str(piece_size), '-o', torrent, filename]
     subprocess.check_output(command, stderr=subprocess.STDOUT)
     return torrent
 
@@ -246,22 +240,45 @@ def extract_isbn(filename):
 
     return None
 
+def rename_ebook(original, output_dir, metadata):
+    new_filename = os.path.join(output_dir, "%s (%s)%s" % (metadata['title'], metadata['isbn'], os.path.splitext(original)[-1]))
+    shutil.copy(original, new_filename)
+    return new_filename
+
 def upload(filename, config, trackers):
+    print
     isbn = extract_isbn(filename)
     if not isbn:
+        print "Failed to extract ISBN from:", filename
         return None
 
-    for tracker in trackers:
-        if tracker.has_book(isbn):
-            continue
+    metadata = fetch_metadata(isbn)
+    if not metadata:
+        return None
 
-        torrent = tracker.upload(filename, isbn)
-        if torrent is None:
-            continue
+    print "Book found: %s (%s) [%s]" % (metadata['title'], metadata['year'], os.path.splitext(filename)[1][1:].upper())
+    ebook = rename_ebook(filename, os.path.expanduser(config.get('global', 'data_dir')), metadata)
 
-        shutil.copy(filename, os.path.expanduser(config.get('global', 'data_dir')))
-        shutil.copy(torrent, os.path.expanduser(config.get('global', 'torrent_dir')))
-        print 'uploaded %s to %s' % (os.path.basename(filename), tracker.__class__.__name__.lower())
+    for i, tracker in enumerate(trackers):
+        try:
+            if tracker.has_book(metadata):
+                continue
+
+            print "Uploading to %s..." % tracker.name,
+
+            # create each tracker's torrent with a different piece size so
+            # that the torrents each have different info hashes (otherwise only one will seed in rtorrent)
+            torrent = make_torrent(ebook, tracker.announce, piece_size=15+i)
+
+            if not tracker.upload(ebook, torrent, metadata):
+                print "failed!"
+                continue
+    
+            shutil.copy(torrent, os.path.expanduser(config.get('global', 'torrent_dir')))
+            print "done!"
+        except Exception as e:
+            print "failed: %s!" % e
+            continue
 
 def main():
     parser = argparse.ArgumentParser()
@@ -277,6 +294,7 @@ def main():
         username = config.get('bibliotik', 'username')
         password = config.get('bibliotik', 'password')
         if username and password:
+            print "Logging into Bibliotik."
             bibliotik = Bibliotik(username, password)
             trackers.append(bibliotik)
             global fetch_metadata
@@ -286,12 +304,14 @@ def main():
         username = config.get('whatcd', 'username')
         password = config.get('whatcd', 'password')
         if username and password:
+            print "Logging into What.CD."
             trackers.append(WhatCD(username, password))
 
     if config.items('stp'):
         username = config.get('stp', 'username')
         password = config.get('stp', 'password')
         if username and password:
+            print "Logging into STP."
             trackers.append(STP(username, password))
 
     books = itertools.chain(*(locate(book_dir, is_book) for book_dir in args.book_dirs))
