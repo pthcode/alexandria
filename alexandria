@@ -2,6 +2,7 @@
 import re
 import os
 import sys
+import pprint
 import shutil
 import urllib
 import argparse
@@ -28,6 +29,12 @@ HEADERS = {
     'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3'
 }
 
+MIMETYPES = {
+    'application/pdf': '.pdf',
+    'application/epub+zip': '.epub',
+    'image/vnd.djvu': '.djvu',
+}
+
 class Tracker(object):
     def __init__(self, username, password):
         self.session = requests.Session()
@@ -40,6 +47,7 @@ class Bibliotik(Tracker):
         '.pdf': '2',
         '.mobi': '16',
         '.epub': '15',
+        '.djvu': '4',
     }
 
     def login(self, username, password):
@@ -127,6 +135,7 @@ class STP(Tracker):
         '.pdf': 'PDF',
         '.epub': 'EPUB',
         '.mobi': 'MOBI',
+        '.djvu': 'DJVU',
     }
 
     def login(self, username, password):
@@ -173,12 +182,23 @@ class STP(Tracker):
 
 def locate(root, match_function):
     for path, dirs, files in os.walk(root):
-        for filename in (os.path.abspath(os.path.join(path, filename)) for filename in files if match_function(filename)):
+        for filename in itertools.ifilter(match_function, (os.path.abspath(os.path.join(path, filename)) for filename in files)):
             yield filename
 
 def is_book(filename):
-    extension = os.path.splitext(filename)[-1].lower()
-    return extension in ['.pdf', '.epub', '.mobi']
+    return determine_format(filename) is not None
+
+def determine_format(filename):
+    extension = os.path.splitext(filename)[-1]
+    if extension in ['.epub', '.mobi', '.pdf', '.djvu']:
+        return extension
+
+    mimetype = subprocess.check_output(['file', '-b', '-i', filename]).split(';')[0]
+    try:
+        return MIMETYPES[mimetype]
+    except Exception as e:
+        print e
+        return None
 
 def make_torrent(filename, announce, piece_size=16):
     torrent = subprocess.check_output(['mktemp', '-u', '--suffix', '.torrent']).strip()
@@ -186,14 +206,45 @@ def make_torrent(filename, announce, piece_size=16):
     subprocess.check_output(command, stderr=subprocess.STDOUT)
     return torrent
 
+_slugify_strip_re = re.compile(r'[^\w\s-]')
+_slugify_hyphenate_re = re.compile(r'[-\s]+')
+def tagify(value):
+    """
+    Normalizes string, converts to lowercase, removes non-alpha characters,
+    and converts spaces to hyphens.
+    
+    From Django's "django/template/defaultfilters.py".
+    """
+    import unicodedata
+    if not isinstance(value, unicode):
+        value = unicode(value)
+    value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore')
+    value = unicode(_slugify_strip_re.sub('', value).strip().lower())
+    return _slugify_hyphenate_re.sub('.', value)
+
 def fetch_metadata(isbn):
     params = {'bibkeys': 'ISBN:%s' % isbn, 'jscmd': 'details', 'format': 'json'}
     r = requests.get('http://openlibrary.org/api/books', params=params)
     data = r.json()
-    if data:
-        return data
-    else:
-        return None
+    try:
+        data = data.itervalues().next()
+        details = data['details']
+        result = {
+            'isbn': (details.get('isbn_10') or details.get('isbn_13'))[0],
+            'year': re.search('\d{4}', details.get('publish_date')).group(),
+            'title': (details.get('full_title') or details.get('title')).encode('utf-8'),
+            'authors': ', '.join(author.get('name') for author in details['authors']).encode('utf-8'),
+            'publisher': (details.get('publishers') or ['',])[0].encode('utf-8'),
+            'image': data.get('thumbnail_url'),
+            'tags': ', '.join(tagify(genre) for genre in (details.get('genres') or details.get('subjects'))),
+        }
+        try:
+            result['description'] = details['description']['value'].encode('utf-8')
+        except:
+            pass
+        return result
+    except Exception as e:
+        print e
 
 def parse_config(config_path):
     config = ConfigParser.SafeConfigParser()
@@ -234,46 +285,60 @@ def extract_isbn(filename):
     if match:
         return match.group()
 
-    extension = os.path.splitext(filename)[-1]
-    if extension == '.pdf':
+    data_format = determine_format(filename)
+    if data_format == '.pdf':
         command = ['pdftotext', '-f', '1', '-l', '10', filename, '-']
-        text = subprocess.check_output(command)
+        text = subprocess.check_output(command, stderr=subprocess.PIPE)
         match = re.search('(?:[0-9]{3}-)?[0-9]{1,5}-[0-9]{1,7}-[0-9]{1,6}-[0-9]', text)
         if match:
             return match.group().replace('-', '')
-    elif extension == '.mobi':
+    elif data_format == '.mobi':
         b = mobi.Book(filename)
         try:
             return b.exth['isbn'][0]
         except:
             pass
-    elif extension == '.epub':
+    elif data_format == '.epub':
         r = epub.EpubMetaReader(filename)
         meta = r.get_metadata()
-        return meta['identifier'][0].value
+        identifier = meta['identifier'][0].value
+        match = re.search('(\d{10}|\d{13})', identifier)
+        if match:
+            return match.group()
+    elif data_format == '.djvu':
+        command = ['djvused', filename, '-e', 'print-pure-txt']
+        text = subprocess.check_output(command, stderr=subprocess.PIPE)
+        match = re.search('(?:[0-9]{3}-)?[0-9]{1,5}-[0-9]{1,7}-[0-9]{1,6}-[0-9]', text)
+        if match:
+            return match.group().replace('-', '')
 
     return None
 
 def rename_ebook(original, output_dir, metadata):
-    new_filename = "%s (%s)%s" % (metadata['title'], metadata['isbn'], os.path.splitext(original)[-1])
+    extension = determine_format(original)
+    new_filename = "%s (%s)%s" % (metadata['title'], metadata['isbn'], extension)
     valid_chars = '-_.() abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
     new_filename = os.path.join(output_dir, ''.join(c for c in new_filename if c in valid_chars))
     shutil.copy(original, new_filename)
     return new_filename
 
 def upload(filename, config, trackers):
-    print
-    isbn = extract_isbn(filename)
-    if not isbn:
-        print "Failed to extract ISBN from:", filename
-        return None
+    try:
+        print
+        isbn = extract_isbn(filename)
+        if not isbn:
+            print "Failed to extract ISBN from:", filename
+            return None
 
-    metadata = fetch_metadata(isbn)
-    if not metadata:
-        return None
+        metadata = fetch_metadata(isbn)
+        if not metadata:
+            print "Failed to fetch metadata for %s: %s" % (isbn, filename)
+            return None
 
-    print "Book found: %s (%s) [%s]" % (metadata['title'], metadata['year'], os.path.splitext(filename)[1][1:].upper())
-    ebook = rename_ebook(filename, os.path.expanduser(config.get('global', 'data_dir')), metadata)
+        print "Book found: %s (%s) [%s]" % (metadata['title'], metadata['year'], determine_format(filename)[1:].upper())
+        ebook = rename_ebook(filename, os.path.expanduser(config.get('global', 'data_dir')), metadata)
+    except Exception as e:
+        return None
 
     for i, tracker in enumerate(trackers):
         try:
@@ -312,9 +377,9 @@ def main():
         if username and password:
             print "Logging into Bibliotik."
             bibliotik = Bibliotik(username, password)
-            trackers.append(bibliotik)
             global fetch_metadata
-            fetch_metadata = bibliotik.fetch_metadata
+            fetch_metadata = bibliotik.fetch_metadata 
+            trackers.append(bibliotik)
 
     if config.items('whatcd'):
         username = config.get('whatcd', 'username')
