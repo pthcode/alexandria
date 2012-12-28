@@ -12,6 +12,8 @@ import ConfigParser
 import multiprocessing
 import requests
 import lxml.html
+import epub
+import mobi
 
 HEADERS = {
     'Connection': 'keep-alive',
@@ -236,16 +238,19 @@ def extract_isbn(filename):
     if extension == '.pdf':
         command = ['pdftotext', '-f', '1', '-l', '10', filename, '-']
         text = subprocess.check_output(command)
-    else:
-        textfile = subprocess.check_output(['mktemp', '-u', '--suffix', '.txt']).strip()
-        command = ['ebook-convert', filename, textfile]
-        subprocess.check_output(command)
-        with open(textfile) as f:
-            text = f.read()
-
-    match = re.search('(?:[0-9]{3}-)?[0-9]{1,5}-[0-9]{1,7}-[0-9]{1,6}-[0-9]', text)
-    if match:
-        return match.group().replace('-', '')
+        match = re.search('(?:[0-9]{3}-)?[0-9]{1,5}-[0-9]{1,7}-[0-9]{1,6}-[0-9]', text)
+        if match:
+            return match.group().replace('-', '')
+    elif extension == '.mobi':
+        b = mobi.Book(filename)
+        try:
+            return b.exth['isbn'][0]
+        except:
+            pass
+    elif extension == '.epub':
+        r = epub.EpubMetaReader(filename)
+        meta = r.get_metadata()
+        return meta['identifier'][0].value
 
     return None
 
