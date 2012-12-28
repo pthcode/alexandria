@@ -7,7 +7,7 @@ been already.
 ## Installation
 
 ```
-# aptitude install mktorrent poppler-utils
+# aptitude install mktorrent poppler-utils djvulibre
 $ pip install -r requirements.txt
 ```
 
