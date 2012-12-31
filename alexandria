@@ -385,7 +385,7 @@ def baconbits_upload(filename):
             'sID': 'v851uqaj1hn3lb8dogqrsfo8p7',
         }
         r = requests.post('https://images.baconbits.org/upload.php', data=data, files=files)
-        return "https://images.baconbits.org/?v=%s" % r.json()['ImgName']
+        return "https://images.baconbits.org/images/%s" % r.json()['ImgName']
 
 def fetch_metadata(isbn):
     try:
