@@ -142,12 +142,18 @@ class Bibliotik(Tracker):
 
     def upload(self, filename, torrent, metadata):
         files = {'TorrentFileField': open(torrent, 'rb')}
+        isbn = metadata['isbn']
+        try:
+            # use bibliotik's isbn canonicalization
+            isbn = self.fetch_metadata(isbn)['isbn']
+        except:
+            pass
         data = {
             'upload': '',
             'authkey': self.authkey,
             'AuthorsField': metadata['authors'],
             'TitleField': metadata['title'],
-            'IsbnField': self.fetch_metadata(metadata['isbn'])['isbn'],
+            'IsbnField': isbn,
             'PublishersField': metadata['publisher'],
             'PagesField': metadata.get('pages') or '',
             'YearField': metadata['year'],
@@ -170,8 +176,13 @@ class Bibliotik(Tracker):
         return None
 
     def has_book(self, metadata):
-        metadata = self.fetch_metadata(metadata['isbn'])
-        params = {'search': '@isbn %s' % metadata['isbn']}
+        isbn = metadata['isbn']
+        try:
+            # use bibliotik's isbn canonicalization
+            isbn = self.fetch_metadata(isbn)['isbn']
+        except:
+            pass
+        params = {'search': '@isbn %s' % isbn}
         r = self.session.get('http://bibliotik.org/torrents/', params=params)
         return 'No torrents found.' not in r.text
 
@@ -352,13 +363,29 @@ def html_to_bbcode(html):
 
 def upload_image(filename):
     try:
-        with open(filename, 'rb') as f:
-            image = base64.b64encode(f.read())
-            data = {'key': '23b8b2c0b8d561d966ed62d9518abec3', 'image': image}
-            r = requests.post("http://api.imgur.com/2/upload.json", data=data, verify=False)
-            return r.json()['upload']['links']['original']
+        return imgur_upload(filename)
     except:
-        return ''
+        return baconbits_upload(filename)
+
+def imgur_upload(filename):
+    with open(filename, 'rb') as f:
+        image = base64.b64encode(f.read())
+        data = {'key': '4fc3866b77c289934bd83e324b16e1e0', 'image': image}
+        r = requests.post("http://api.imgur.com/2/upload.json", data=data, verify=False)
+        return r.json()['upload']['links']['original']
+
+def baconbits_upload(filename):
+    with open(filename, 'rb') as f:
+        files = {'ImageUp': (os.path.basename(filename), f)}
+        data = {
+            'Filename': os.path.basename(filename),
+            'fileext': '*.jpg;*.jpeg;*.png;*.gif;*.bmp',
+            'Upload': 'Submit Query',
+            'folder': '/',
+            'sID': 'v851uqaj1hn3lb8dogqrsfo8p7',
+        }
+        r = requests.post('https://images.baconbits.org/upload.php', data=data, files=files)
+        return "https://images.baconbits.org/?v=%s" % r.json()['ImgName']
 
 def fetch_metadata(isbn):
     try:
