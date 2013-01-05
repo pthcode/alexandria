@@ -257,9 +257,6 @@ class STP(Tracker):
             'release_desc': 'Created with [url=https://github.com/zacharydenton/alexandria]alexandria[/url].',
         }
 
-        if data['year'] == '2012':
-            data['tags'] += ', contest.2012'
-
         r = self.session.post('https://stopthepress.es/upload.php', data=data, files=files)
         return True
 
