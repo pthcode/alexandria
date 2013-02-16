@@ -321,7 +321,7 @@ def is_book(filename):
     return determine_format(filename) is not None
 
 def determine_format(filename):
-    extension = os.path.splitext(filename)[-1]
+    extension = os.path.splitext(filename)[-1].lower()
     if extension in ['.epub', '.mobi', '.pdf', '.djvu']:
         return extension
 
