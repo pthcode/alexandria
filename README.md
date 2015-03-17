@@ -7,7 +7,7 @@ been already.
 ## Installation
 
 ```
-# aptitude install mktorrent poppler-utils djvulibre calibre
+# apt-get install mktorrent poppler-utils djvulibre-bin calibre
 $ pip install -r requirements.txt
 ```
 

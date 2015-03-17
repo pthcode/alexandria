@@ -144,4 +144,4 @@ LANGUAGES[9][4] = ('us', "United States")
 LANGUAGES[9][52] = ('ph', "Philippines")
 LANGUAGES[97][0] = ('ne', "Nepali")
 LANGUAGES[9][8] = ('gb', "United Kingdom")
-LANGUAGES[20][04] = ('nb', "Norwegian Bokmaal")  # Guess
+LANGUAGES[20][4] = ('nb', "Norwegian Bokmaal")  # Guess

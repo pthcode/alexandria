@@ -10,9 +10,18 @@ import argparse
 import itertools
 import subprocess
 import unicodedata
-import ConfigParser
 import multiprocessing
-from HTMLParser import HTMLParser
+
+try:
+    import ConfigParser
+except ImportError:
+    import configparser as ConfigParser
+
+try:
+    from HTMLParser import HTMLParser
+except ImportError:
+    from html.parser import HTMLParser
+
 import requests
 import lxml.html
 import epub
@@ -109,6 +118,7 @@ class Tracker(object):
     def __init__(self, username, password):
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
+        self.session.verify = False # for self-signed SSL certificates
         self.login(username, password)
 
 class Bibliotik(Tracker):
@@ -234,7 +244,7 @@ class STP(Tracker):
         r = self.session.get('https://stopthepress.es/upload.php')
         doc = lxml.html.fromstring(r.text)
         self.authkey = doc.xpath('//*[@id="upload_table"]/div[1]/input[2]')[0].attrib['value']
-        self.announce = doc.xpath('//*[@id="content"]/div[2]/p/input')[0].attrib['value']
+        self.announce = doc.xpath('//*[@id="content"]//div[2]/p/input')[0].attrib['value']
 
     def upload(self, filename, torrent, metadata):
         authors = [author.strip() for author in metadata['authors'].split(',')]
@@ -250,11 +260,11 @@ class STP(Tracker):
             'catalogue_number': metadata['isbn'],
             'year': metadata['year'],
             'format': self.formats[os.path.splitext(filename)[-1]],
-            'media': 'Unknown',
+            'source': 'Unknown',
             'tags': metadata['tags'] or 'non.fiction',
             'image': metadata['image'],
             'album_desc': metadata['description'],
-            'release_desc': 'Created with [url=https://github.com/zacharydenton/alexandria]alexandria[/url].',
+            'release_desc': 'Created with [url=https://bitbucket.org/zacharydenton/alexandria]alexandria[/url].',
         }
 
         r = self.session.post('https://stopthepress.es/upload.php', data=data, files=files)
@@ -329,7 +339,6 @@ def determine_format(filename):
     try:
         return MIMETYPES[mimetype]
     except Exception as e:
-        print e
         return None
 
 def create_tempfile(suffix):
@@ -434,7 +443,7 @@ def parse_config(config_path):
         with open(config_path, 'w') as f:
             config.write(f)
 
-        print 'Please edit the configuration file: %s' % config_path
+        print('Please edit the configuration file: %s' % config_path)
         sys.exit(2)
 
     return config
@@ -484,8 +493,8 @@ def rename_ebook(original, output_dir, metadata):
 def upload(filename, config, trackers):
     isbn = extract_isbn(filename)
     if not isbn:
-        print
-        print "Failed to extract ISBN from:", filename
+        print()
+        print("Failed to extract ISBN from:", filename)
         return
 
     try:
@@ -497,29 +506,29 @@ def upload(filename, config, trackers):
     print
     metadata = fetch_metadata(isbn)
     if not metadata:
-        print "Failed to fetch metadata for %s: %s" % (isbn, filename)
+        print("Failed to fetch metadata for %s: %s" % (isbn, filename))
         return
 
-    print "Book found: %s (%s) [%s]" % (metadata['title'], metadata['year'], determine_format(filename)[1:].upper())
+    print("Book found: %s (%s) [%s]" % (metadata['title'], metadata['year'], determine_format(filename)[1:].upper()))
     ebook = rename_ebook(filename, os.path.expanduser(config.get('global', 'data_dir')), metadata)
 
     for i, tracker in enumerate(trackers):
         if tracker.has_book(metadata):
-            print "%s already has it." % tracker.name
+            print("%s already has it." % tracker.name)
             continue
 
-        print "Uploading to %s..." % tracker.name,
+        print("Uploading to %s..." % tracker.name),
 
         # create each tracker's torrent with a different piece size so
         # that the torrents each have different info hashes (otherwise only one will seed in rtorrent)
         torrent = make_torrent(ebook, tracker.announce, piece_size=15+i)
 
         if not tracker.upload(ebook, torrent, metadata):
-            print "failed!"
+            print("failed!")
             continue
 
         shutil.copy(torrent, os.path.expanduser(config.get('global', 'torrent_dir')))
-        print "done!"
+        print("done!")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -535,7 +544,7 @@ def main():
         username = config.get(tracker.__name__.lower(), 'username')
         password = config.get(tracker.__name__.lower(), 'password')
         if username and password:
-            print "Logging into %s." % tracker.name
+            print("Logging into %s." % tracker.name)
             trackers.append(tracker(username, password))
 
     books = itertools.chain(*(locate(book_dir, is_book) for book_dir in args.book_dirs))

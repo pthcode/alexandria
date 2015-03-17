@@ -29,10 +29,13 @@ from zipfile import ZipFile
 from xml.dom.minidom import parseString
 import copy
 import re
-from StringIO import StringIO
 import types
 import os 
 
+try:
+    from StringIO import StringIO
+except ImportError:
+    from io import StringIO
 
 ### CONSTANTS & DEFINES
 
@@ -101,7 +104,7 @@ def rename_file (p, md):
         'short_title': short_title,
         'isbn': isbn,
     }
-    print new_file_name
+    print(new_file_name)
     os.rename (p, new_file_name)
     
     
@@ -364,7 +367,7 @@ def main():
     cmd, infiles, options = parse_args()
     
     for p in in_files:
-        print "* Reading '%s' ..." % p
+        print("* Reading '%s' ..." % p)
         rdr = EpubMetaReader (p)
         md = rdr.get_metadata()
         
@@ -395,7 +398,7 @@ def main():
             buf.write (u"\n")
             print (buf.getvalue().encode ('ascii', 'replace'))
         elif op in ['raw']:
-            print str(md)
+            print(str(md))
         elif op in ['rename']:
             rename_file (p, md)
 
