@@ -299,9 +299,12 @@ def determine_format(filename):
 def create_tempfile(suffix):
     return subprocess.check_output(['mktemp', '-u', '--suffix', suffix]).strip()
 
-def make_torrent(filename, announce, piece_size=16):
+def make_torrent(filename, announce, tracker_name, piece_size=16):
     torrent = create_tempfile('.torrent')
-    command = ['mktorrent', '-p', '-a', announce, '-l', str(piece_size), '-o', torrent, filename]
+    if tracker_name == PTH.name:
+        command = ['mktorrent', '-p', '-s', tracker_name, '-a', announce, '-l', str(piece_size), '-o', torrent, filename]
+    else: # not sure if biblotik needs/wants the source filled in
+        command = ['mktorrent', '-p', '-a', announce, '-l', str(piece_size), '-o', torrent, filename]
     subprocess.check_output(command, stderr=subprocess.STDOUT)
     return torrent
 
@@ -472,7 +475,7 @@ def upload(filename, config, trackers):
 
         # create each tracker's torrent with a different piece size so
         # that the torrents each have different info hashes (otherwise only one will seed in rtorrent)
-        torrent = make_torrent(ebook, tracker.announce, piece_size=15+i)
+        torrent = make_torrent(ebook, tracker.announce, tracker.name, piece_size=15+i)
 
         if not tracker.upload(ebook, torrent, metadata):
             print("failed!")
