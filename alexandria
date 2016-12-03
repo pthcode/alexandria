@@ -144,9 +144,9 @@ class Bibliotik(Tracker):
 
     def login(self, username, password):
         params = {'username': username, 'password': password}
-        self.session.post('http://bibliotik.org/login', params)
+        self.session.post('https://bibliotik.org/login', params)
 
-        r = self.session.get('http://bibliotik.org/upload/ebooks')
+        r = self.session.get('https://bibliotik.org/upload/ebooks')
         doc = lxml.html.fromstring(r.text)
         self.authkey = doc.xpath('//*[@id="body"]/form/input[2]')[0].attrib['value']
         self.announce = doc.xpath('//*[@id="body"]/p/input')[0].attrib['value']
@@ -176,12 +176,12 @@ class Bibliotik(Tracker):
             'DescriptionField': (metadata['description'].decode('utf-8') + BANNER).encode('utf-8'),
         }
 
-        r = self.session.post('http://bibliotik.me/upload/ebooks', files=files, data=data)
+        r = self.session.post('https://bibliotik.me/upload/ebooks', files=files, data=data)
         return True
 
     def fetch_metadata(self, isbn):
         params = {'isbn': isbn, 'authkey': self.authkey}
-        r = self.session.get('http://bibliotik.me/isbnlookup', params=params)
+        r = self.session.get('https://bibliotik.me/isbnlookup', params=params)
         data = r.json()
         if 'isbn' in data:
             return data
@@ -195,7 +195,7 @@ class Bibliotik(Tracker):
         except:
             pass
         params = {'search': '@isbn %s' % isbn}
-        r = self.session.get('http://bibliotik.me/torrents/', params=params)
+        r = self.session.get('https://bibliotik.me/torrents/', params=params)
         return 'No torrents found.' not in r.text
 
 class PTH(Tracker):
@@ -279,7 +279,7 @@ class HTML2BBCode(HTMLParser):
 
 def locate(root, match_function):
     for path, dirs, files in os.walk(root):
-        for filename in itertools.ifilter(match_function, (os.path.abspath(os.path.join(path, filename)) for filename in files)):
+        for filename in filter(match_function, (os.path.abspath(os.path.join(path, filename)) for filename in files)):
             yield filename
 
 def is_book(filename):
