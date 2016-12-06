@@ -114,6 +114,8 @@ TAGS = {
     "women",
 }
 
+ISBN_REGEX = re.compile('(ISBN[-]*(1[03])*[ ]*(: ){0,1})*(([0-9Xx][- ]*){13}|([0-9Xx][- ]*){10})')
+
 class Tracker(object):
     def __init__(self, username, password):
         self.session = requests.Session()
@@ -407,7 +409,7 @@ def fetch_metadata(isbn):
             'tags': parse_tags(result.get('tags', '')),
             'language': result['languages'],
             'year': result['published'][:4],
-            'isbn': re.search('isbn:(\d+)', result['identifiers']).group(1),
+            'isbn': isbn(result['identifiers']),
             'description': html_to_bbcode(result['comments'].decode('utf-8')).encode('utf-8'),
             'image': upload_image(cover),
         }
@@ -449,38 +451,60 @@ def parse_config(config_path):
     return config
 
 def extract_isbn(filename):
-    match = re.search('(\d{13}|\d{10})', filename)
+    match = isbn(filename)
     if match:
-        return match.group()
+        return match
 
     data_format = determine_format(filename)
     if data_format == '.pdf':
         command = ['pdftotext', '-f', '1', '-l', '10', filename, '-']
         text = subprocess.check_output(command, stderr=subprocess.PIPE)
-        match = re.search('(?:[0-9]{3}-)?[0-9]{1,5}-[0-9]{1,7}-[0-9]{1,6}-[0-9]', text)
-        if match:
-            return match.group().replace('-', '')
+        return isbn(text)
     elif data_format == '.mobi':
         b = mobi.Book(filename)
         try:
-            return b.exth['isbn'][0]
+            return b.exth['isbn'][0].replace('-', '')
         except:
             pass
     elif data_format == '.epub':
         r = epub.EpubMetaReader(filename)
         meta = r.get_metadata()
         identifier = meta['identifier'][0].value
-        match = re.search('(\d{13}|\d{10})', identifier)
-        if match:
-            return match.group()
+        return isbn(identifier)
     elif data_format == '.djvu':
         command = ['djvused', filename, '-e', 'print-pure-txt']
         text = subprocess.check_output(command, stderr=subprocess.PIPE)
-        match = re.search('(?:[0-9]{3}-)?[0-9]{1,5}-[0-9]{1,7}-[0-9]{1,6}-[0-9]', text)
-        if match:
-            return match.group().replace('-', '')
+        return isbn(text)
 
     return None
+
+def isbn(string):
+    for match in ISBN_REGEX.finditer(string):
+        s = match.group(4).replace(' ', '').replace('-', '')
+        if valid_isbn(s):
+            return s
+    return None
+
+def valid_isbn(string):
+    chars = list(string)
+    last = chars.pop()
+
+    if len(chars) == 9:
+        # Compute the ISBN-10 check digit
+        val = sum((x + 2) * int(y) for x,y in enumerate(reversed(chars)))
+        check = 11 - (val % 11)
+        if check == 10:
+            check = "X"
+        elif check == 11:
+            check = "0"
+    else:
+        # Compute the ISBN-13 check digit
+        val = sum((x % 2 * 2 + 1) * int(y) for x,y in enumerate(chars))
+        check = 10 - (val % 10)
+        if check == 10:
+            check = "0"
+
+    return str(check) == last
 
 def rename_ebook(original, output_dir, metadata):
     extension = determine_format(original)
