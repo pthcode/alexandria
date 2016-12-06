@@ -142,9 +142,9 @@ class Bibliotik(Tracker):
 
     def login(self, username, password):
         params = {'username': username, 'password': password}
-        self.session.post('https://bibliotik.org/login', params)
+        self.session.post('https://bibliotik.me/login', params)
 
-        r = self.session.get('https://bibliotik.org/upload/ebooks')
+        r = self.session.get('https://bibliotik.me/upload/ebooks')
         doc = lxml.html.fromstring(r.text)
         self.authkey = doc.xpath('//*[@id="body"]/form/input[2]')[0].attrib['value']
         self.announce = doc.xpath('//*[@id="body"]/p/input')[0].attrib['value']
@@ -223,7 +223,6 @@ class PTH(Tracker):
         return True
 
     def has_book(self, metadata):
-        print
         params = {'searchstr': metadata['title'], 'filter_cat[3]': 1}
         r = self.session.get('https://passtheheadphones.me/torrents.php', params=params)
         return 'Your search did not match anything.' not in r.text
@@ -341,7 +340,8 @@ def fetch_metadata(isbn, config):
         cover = create_tempfile('.jpg')
         command = ['fetch-ebook-metadata', '-i', isbn, '-c', cover]
         output = subprocess.check_output(command, stderr=subprocess.PIPE).decode('utf-8')
-        parsed = re.findall('([\w\(\)]+)\s+:\s(.*)', output)
+        # Evil regex to match the output of fetch-ebook-metadata
+        parsed = re.findall('([^\s]+)\s+?:\s([\s\S]+?)(?=(?:\n[ATPLRPIC])|$)', output)
         result = {re.sub('\W', '', key).lower(): value for key, value in parsed}
         image_url = upload_image(cover, config)
         description = html_to_bbcode(result['comments'])
@@ -437,8 +437,7 @@ def rename_ebook(original, output_dir, metadata):
 def upload(filename, config, trackers):
     isbn = extract_isbn(filename)
     if not isbn:
-        print()
-        print("Failed to extract ISBN from:", filename)
+        print("Failed to extract ISBN from:", filename, "\n")
         return
 
     print
@@ -452,7 +451,7 @@ def upload(filename, config, trackers):
 
     for i, tracker in enumerate(trackers):
         if tracker.has_book(metadata):
-            print("%s already has it." % tracker.name)
+            print("%s already has it.\n" % tracker.name)
             continue
 
         print("Uploading to %s..." % tracker.name),
@@ -482,7 +481,7 @@ def main():
         username = config.get(tracker.__name__.lower(), 'username')
         password = config.get(tracker.__name__.lower(), 'password')
         if username and password:
-            print("Logging into %s..." % tracker.name)
+            print("Logging into %s...\n" % tracker.name)
             trackers.append(tracker(username, password))
 
     books = itertools.chain(*(locate(book_dir, is_book) for book_dir in args.book_dirs))
