@@ -6,14 +6,14 @@ Listing epub ebook metadata and perhaps renaming the book appropriately.
 This script should be called::
 
     python epubmetareader.py [list|rename] book1.epub book2.epub ...
-    
+
 Due to some variations in the way metadata is actually written, this script
 does a a bit of searching and cleaning up to best extract book information. If
 the "list" command is used, this metadata is dumped to the screen. If "rename"
 is used, the original file is renamed in the format::
 
     <first author surname> (<publication year>) <short title> (isbn<isbn>).epub
-    
+
 This only uses the standard Python library to do its magic and should be easily
 modifiable.
 """
@@ -30,7 +30,7 @@ from xml.dom.minidom import parseString
 import copy
 import re
 import types
-import os 
+import os
 
 try:
     from StringIO import StringIO
@@ -55,7 +55,7 @@ CLEAN_ISBN_RE = re.compile (r'[\- ]+')
 def rename_file (p, md):
     # tmpl = <1st author surname> (<year>) <short title> (ISBN<isbn>)
     UNKNOWN = 'UNKNOWN'
-    
+
     # grab the first author or creator
     auths = md.authors() or md.creators()
     if auths:
@@ -64,7 +64,7 @@ def rename_file (p, md):
         name = first_auth.attribs.get('file-as', '').split(',')[0] \
             or first_auth.value.split(' ')[-1] \
             or UNKNOWN
-        
+
     # get year
     pubdate = None
     dateval = md.publication_date() or md.get('date')
@@ -75,7 +75,7 @@ def rename_file (p, md):
             pubdate = m.group(0)
     if not pubdate:
         pubdate = UNKNOWN
-        
+
     # get title
     short_title = None
     title = md.get('title')
@@ -83,7 +83,7 @@ def rename_file (p, md):
         short_title = title.value.split(':')[0]
     else:
         short_title = UNKNOWN
-    
+
     # get isbn
     isbn = None
     ids = md.isbn()
@@ -96,7 +96,7 @@ def rename_file (p, md):
             if len(id_val) in [10, 13]:
                 isbn = id_val
                 break
-    
+
     # build name
     new_file_name = u"%(name)s (%(pubdate)s) %(short_title)s (isbn%(isbn)s).epub" % {
         'name': name,
@@ -106,13 +106,13 @@ def rename_file (p, md):
     }
     print(new_file_name)
     os.rename (p, new_file_name)
-    
-    
-            
-    
-    
-    
-    
+
+
+
+
+
+
+
 def pretty_print(element):
     txt = et.tostring(element)
     return parseString(txt).toprettyxml()
@@ -123,11 +123,11 @@ def strip_namespace(tag):
     Remove the namespace portion of an Etree tagname.
     """
     return DENAMESPACE_RE.sub ('', tag)
-    
+
 
 def clean_attribs (attrib_dict):
-    return dict ([(strip_namespace(k).lower(), v) for k,v in attrib_dict.iteritems()])
-    
+    return dict ([(strip_namespace(k).lower(), v) for k,v in attrib_dict.items()])
+
 
 def tag_to_metval (xml_tag):
     if xml_tag.text:
@@ -138,16 +138,16 @@ def tag_to_metval (xml_tag):
 
 
 class MetadataDict (dict):
-    
+
     def __repr__ (self):
         return "foo"
-        
+
     def __str__ (self):
         return self.__unicode__().encode ('ascii', 'replace')
-        
+
     def __unicode__ (self):
         pairs = []
-        for k, v in self.iteritems():
+        for k, v in self.items():
             if type(v) == types.ListType:
                 v_str = u', '.join ([a.__repr__() for a in v])
             else:
@@ -155,13 +155,13 @@ class MetadataDict (dict):
             pairs.append (u"'%s': '%s'" % (k, v_str))
         pair_str = u", ".join(pairs)
         return u"{%s}" % pair_str
-        
+
     def creators (self, role=None):
         if role:
             return [x for x in self['creator'] if x.attribs.get('role') == role]
         else:
             return self['creator']
-            
+
     def authors (self):
         return self.creators(role='aut')
 
@@ -170,7 +170,7 @@ class MetadataDict (dict):
             return [x for x in self['identifier'] if x.attribs.get('scheme') == scheme]
         else:
             return self['identifier']
-            
+
     def isbn (self):
         return self.identifiers(scheme='ISBN')
 
@@ -179,7 +179,7 @@ class MetadataDict (dict):
             return [x for x in self['date'] if x.attribs.get('event') == event]
         else:
             return self['date']
-            
+
     def publication_date (self):
         return self.dates (event='publication')
 
@@ -192,17 +192,17 @@ class MetaValue (object):
     def __init__ (self, value=None, attribs={}):
         self.value = value
         self.attribs = copy.deepcopy (attribs)
-        
+
     def __str__ (self):
         return self.__unicode__().encode ('ascii', 'replace')
-        
+
     def __repr__ (self):
         return "%s('%s', %s)" % (
             self.__class__.__name__,
             self.value,
-            ", ".join (["%s='%s'" % (k, v) for k,v in self.attribs.iteritems()])
+            ", ".join (["%s='%s'" % (k, v) for k,v in self.attribs.items()])
         )
-        
+
     def __unicode__ (self):
         return self.value
 
@@ -210,19 +210,19 @@ class MetaValue (object):
 class EpubMetaReader (object):
     def __init__ (self, path):
         self.zip = ZipFile (path, mode='r')
-        
+
     def get_metadata (self):
         """
         Search for and return metadata within the ebook.
-        
+
         :Returns:
             A hash of the metadata tags found or `None` if nothing found.
-            
+
         Note that if the metadata is found but is empty, an empty hash is returned.
         We follow this philosophy for the individual fields as well - if a field
         is not found, it doesn't appear in the metadata, but if it appears but is
         empty or cannot be parsed, an empty field appears in the metadata.
-        
+
         """
         # NOTE: a contents file with malformed XML will error, which is acceptable
         # XXX: other fields to looks at
@@ -256,7 +256,7 @@ class EpubMetaReader (object):
                 return md_dict
         # no file, no xml or no metadata tag
         return None
-        
+
     def read_contents_file (self):
         """
         Find and return the contents of the ebook table of contents.
@@ -270,17 +270,17 @@ class EpubMetaReader (object):
     def find_contents_file (self):
         """
         Return the path of the table of contents within the epub zip.
-        
+
         :Returns:
             The location of the table of contents or `None` if it cannot be found
-            
+
         While the location of the TOC is prescribed by the epub standard, in practice
         this is much violated. Therefore we looks for it in the variety of locations:
-        
+
         1. The location given in the container file
         2. Within the OEBPS directory
         3. On the top level
-        
+
         """
         # possible locations for the toc
         possible_paths = [
@@ -297,7 +297,7 @@ class EpubMetaReader (object):
                 return p
         # unsucessful
         return None
-        
+
     def read_container_file (self):
         """
         Return the contents of the container file.
@@ -305,14 +305,14 @@ class EpubMetaReader (object):
         # XXX: it *should* be here. Are there any variants?
         # TODO: need to cope with failure?
         return self.zip.read ('META-INF/container.xml')
-        
+
     def contents_path_from_container (self):
         """
         Return the location of the TOC file as given in the container file.
-        
+
         :Returns:
             A path within the zip, or `None` if not found.
-            
+
         """
         # TODO: can we cope with namespace variants (but synonyms)?
         # XXX: are there any actual variants?
@@ -324,18 +324,18 @@ class EpubMetaReader (object):
             if rootfile != None:
                 return rootfile.attrib.get("full-path", None)
         return None
-        
-        
-        
+
+
+
 class PdfMetaReader (object):
     def __init__ (self, path):
         from pyPdf import PdfFileReader
         self.doc = PdfFileReader(open(p, 'rb'))
-        
+
     def get_metadata (self):
         return self.rdr.documentInfo, self.rdr.xmpMetadata
-        
-        
+
+
 ### MAIN ###
 
 def parse_args():
@@ -345,7 +345,7 @@ def parse_args():
     #epilog='Input and output format is currenlty limited to FASTA.'
 
     optparser = OptionParser (usage=usage, version=version, epilog=epilog)
-    
+
     #optparser.add_option ('-d', '--date-format',
     #   dest="date_format",
     #   action='store',
@@ -353,36 +353,36 @@ def parse_args():
     #   metavar='FMT',
     #   help="Set the format for parsing the date.",
     #)
-    
+
     options, pargs = optparser.parse_args()
     if (len(pargs) != 2):
         optparser.error ('Need at least two arguments (command and input files)')
     cmd, infiles = pargs[0].lower(), pargs[1:]
     assert (cmd in ['info', 'list', 'rename']), "unrecognised command '%s'" % cmd
-    
+
     return cmd, infiles, options
 
 
 def main():
     cmd, infiles, options = parse_args()
-    
+
     for p in in_files:
         print("* Reading '%s' ..." % p)
         rdr = EpubMetaReader (p)
         md = rdr.get_metadata()
-        
+
         if op in ['info', 'list']:
             # dump metadata to screen
             buf = StringIO()
             buf.write (u"----\n" % p)
             buf.write (u"- path: %s\n" % p)
-            for k, v in md.iteritems():
+            for k, v in md.items():
                 buf.write (u"- %s:" % k)
                 if type(v) == types.ListType:
                     buf.write (u"\n")
                     for x in v:
                         buf.write (u"\t- %s" % x)
-                        att_str = ', '.join(["%s: '%s'" % (a, b) for a, b in x.attribs.iteritems()])
+                        att_str = ', '.join(["%s: '%s'" % (a, b) for a, b in x.attribs.items()])
                         if att_str:
                             buf.write (u" (%s)\n" % att_str)
                         else:
@@ -390,7 +390,7 @@ def main():
                 else:
                     buf.write (u" %s" % v)
                     x = v
-                    att_str = ', '.join(["%s='%s'" % (a, b) for a, b in x.attribs.iteritems()])
+                    att_str = ', '.join(["%s='%s'" % (a, b) for a, b in x.attribs.items()])
                     if att_str:
                         buf.write (u" (%s)\n" % att_str)
                     else:
@@ -403,11 +403,10 @@ def main():
             rename_file (p, md)
 
 
-    
-    
+
+
 if __name__ == '__main__':
     main()
-    
-    
-### END #######################################################################
 
+
+### END #######################################################################

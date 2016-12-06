@@ -1,6 +1,6 @@
-## Introduction
+# alexandria
 
-This is an ebook autouploader for various private trackers. It will
+alexandria is an ebook auto-uploader for various private trackers. It will
 fetch metadata for all of your books and upload them if they haven't
 been already.
 
@@ -16,4 +16,3 @@ $ pip install -r requirements.txt
 ```
 $ python alexandria /path/to/books
 ```
-
